@@ -11,6 +11,7 @@
 
 const EDGE_TOLERANCE = 80;  // px, covers tile padding and a panel on any edge
 const MIN_DELTA = 4;        // px, ignore smaller geometry changes
+const DESKTOP_EVENT_MS = 50; // a desktop change can announce a geometry change that never happens
 
 class TileAnimationEffect {
     constructor() {
@@ -34,6 +35,7 @@ class TileAnimationEffect {
     manage(window) {
         window.windowFrameGeometryAboutToChange.connect(this.onAboutToChange.bind(this));
         window.windowFrameGeometryChanged.connect(this.onGeometryChanged.bind(this));
+        window.windowDesktopsChanged.connect(this.onDesktopsChanged.bind(this));
         // The built-in Stretch effect owns maximize/restore, stay out of its way.
         window.windowMaximizedStateAboutToChange.connect(w => { w.tileAnimSkip = true; });
         window.windowMaximizedStateChanged.connect(w => { w.tileAnimSkip = false; });
@@ -85,11 +87,23 @@ class TileAnimationEffect {
         }
     }
 
+    // Moving a window between desktops (or putting it on all of them) makes KWin emit
+    // frameGeometryAboutToChange although the geometry stays the same. A cross-fade started
+    // for that would run for nothing and make the window stutter, so drop it.
+    onDesktopsChanged(window) {
+        window.tileDesktopsChangedAt = Date.now();
+        if (window.tileFade && !window.tileFadeUsed) {
+            this.cancelFade(window);
+        }
+    }
+
     onAboutToChange(window) {
-        if (!this.eligible(window) || !this.crossFade) {
+        if (!this.eligible(window) || !this.crossFade
+                || Date.now() - (window.tileDesktopsChangedAt || 0) < DESKTOP_EVENT_MS) {
             return;
         }
         this.cancelFade(window);
+        window.tileFadeUsed = false;
         window.tileFade = animate({
             window: window,
             duration: this.duration,
@@ -164,6 +178,7 @@ class TileAnimationEffect {
 
         // Make both animations end on the same frame so the forced blur is not dropped early.
         if (window.tileFade) {
+            window.tileFadeUsed = true;
             retarget(window.tileFade, 1.0, this.duration);
         }
     }
