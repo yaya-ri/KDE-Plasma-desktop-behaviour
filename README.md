@@ -90,6 +90,8 @@ Animasi gesernya berasal dari efek **Slide** bawaan KDE (System Settings → Des
 
 Pengaturan (tombol konfigurasi di KWin Scripts): pemicunya bisa **Maximized** (default), **Made fullscreen**, atau **Maximized or fullscreen**. Tombol hijau macOS sebenarnya lebih mirip fullscreen, jadi pilih sesuai selera.
 
+Jendela dan desktop bergerak **bersamaan**: jendela meregang sambil desktop bergeser, seperti di macOS. Kalau terasa terlalu cepat, lihat [Mengatur kecepatan animasi](#mengatur-kecepatan-animasi).
+
 Perilaku tambahan:
 
 - Jendela yang ditutup saat sedang maximize: desktopnya dihapus dan tampilan kembali.
@@ -130,6 +132,19 @@ Perintah ini mengembalikan semua jendela ke perilaku normal KDE terlebih dulu, b
 Alternatifnya, di **System Settings → Keyboard → Shortcuts** (bagian *KWin*) ada shortcut **Per-monitor desktops: restore normal behavior**. Beri tombol, lalu tekan sebelum mematikan script.
 
 Kalau jendela terlanjur tersembunyi: jalankan `kde-desktop-behaviour disable per-monitor-desktops`. Jendela yang hilang itu hanya ter-minimize, jadi masih bisa dipulihkan dari taskbar.
+
+## Mengatur kecepatan animasi
+
+Kalau animasi terasa terlalu cepat sampai tidak terlihat, ada beberapa tempat untuk mengaturnya, semuanya dari pengaturan KDE:
+
+| Yang ingin diatur | Di mana |
+|---|---|
+| **Semua animasi sekaligus** (maximize, geser desktop, tile, dan lainnya) | System Settings, cari **Animation speed** (di Plasma 6: *Appearance & Style → Animations*). Geser slider ke arah *lambat*. Ini yang paling besar pengaruhnya, dan berlaku untuk semua efek. |
+| Animasi tile | **Desktop Effects → Tile Animation → gear → Duration**. Nilainya dikalikan slider *Animation speed*. |
+| Animasi regang jendela saat maximize | Efek **Stretch** bawaan KDE, tidak punya pengaturan sendiri. Hanya mengikuti slider *Animation speed*. |
+| Animasi geser desktop | Efek **Slide** bawaan KDE. Pengaturannya hanya jarak antar desktop, tidak ada durasi. Hanya mengikuti slider *Animation speed*. |
+
+Slider *Animation speed* di bawah 100% memperpendek semua animasi. Kalau animasi terasa singkat, cek dulu slider itu.
 
 ## Mengatasi masalah
 
