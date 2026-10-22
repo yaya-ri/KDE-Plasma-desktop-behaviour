@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SpaceMaximizeConfig</class>
+ <widget class="QWidget" name="SpaceMaximizeConfig">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>455</width><height>80</height></rect>
+  </property>
+  <layout class="QFormLayout" name="formLayout">
+   <item row="0" column="0">
+    <widget class="QLabel" name="label_Trigger">
+     <property name="text"><string>Move window to its own desktop when it is:</string></property>
+    </widget>
+   </item>
+   <item row="0" column="1">
+    <widget class="QComboBox" name="kcfg_Trigger">
+     <item><property name="text"><string>Maximized</string></property></item>
+     <item><property name="text"><string>Made fullscreen</string></property></item>
+     <item><property name="text"><string>Maximized or fullscreen</string></property></item>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+</ui>

@@ -1,0 +1,22 @@
+{
+    "KPackageStructure": "KWin/Effect",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "yaya-ri"
+            }
+        ],
+        "Category": "Window Management",
+        "Description": "Smoothly animate windows when they are tiled, snapped or restored (macOS-style)",
+        "EnabledByDefault": false,
+        "Icon": "preferences-system-windows-effect-maximize",
+        "Id": "tileanimation",
+        "License": "GPL",
+        "Name": "Tile Animation",
+        "Version": "1.0",
+        "Website": "https://github.com/yaya-ri/KDE-Plasma-desktop-behaviour"
+    },
+    "X-KDE-ConfigModule": "kcm_kwin4_genericscripted",
+    "X-KDE-Ordering": 61,
+    "X-Plasma-API": "javascript"
+}

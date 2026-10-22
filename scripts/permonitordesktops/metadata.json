@@ -1,0 +1,20 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "yaya-ri"
+            }
+        ],
+        "Category": "Window Management",
+        "Description": "Give every monitor its own current virtual desktop (like macOS 'Displays have separate Spaces'): switching desktops only affects the monitor you are on.",
+        "EnabledByDefault": false,
+        "Icon": "preferences-desktop-virtual",
+        "Id": "permonitordesktops",
+        "License": "GPL",
+        "Name": "Separate Desktops per Monitor",
+        "Version": "1.0",
+        "Website": "https://github.com/yaya-ri/KDE-Plasma-desktop-behaviour"
+    },
+    "X-Plasma-API": "javascript"
+}
