@@ -116,7 +116,7 @@ Pada KDE biasa, desktop virtual bersifat global. Kalau kamu menggeser dari Deskt
 - Jendela yang disembunyikan tampil sebagai jendela ter-minimize di taskbar. Mengklik jendela itu membawa monitornya ke desktop jendela tersebut.
 - Jendela yang kamu seret ke monitor lain ikut desktop yang sedang tampil di monitor itu.
 - Jumlah desktop tetap global. Desktop baru muncul di semua monitor.
-- Jendela **ter-tile** yang terlihat di monitor lain tetap di posisinya, tapi "ukuran bebas sebelum di-tile" miliknya tertimpa. Kalau nanti di-drag keluar dari tile, ukurannya tetap sebesar tile. Ini batasan KWin: tile menempel pada satu desktop.
+- Jendela **ter-tile** di monitor yang sedang beku dilepas dari tile-nya sementara (posisi dan ukurannya tidak berubah), lalu dipasang kembali ke tile saat monitornya aktif lagi. Ini perlu karena tile di KWin menempel pada satu desktop: kalau tidak dilepas, KWin akan meng-untile jendela itu dan menggesernya begitu desktop aktif berganti. Efek sampingnya, "ukuran bebas sebelum di-tile" milik jendela itu tertimpa. Kalau nanti di-drag keluar dari tile, ukurannya tetap sebesar tile.
 - Kalau monitor dicabut, jendela yang tersembunyi di sana muncul di monitor yang tersisa.
 - Dialog dan jendela khusus tidak dikelola.
 - Perpindahan monitor aktif lewat kursor dicek tiap 100 ms.

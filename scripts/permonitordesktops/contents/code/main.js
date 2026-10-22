@@ -13,9 +13,10 @@
     - Moving the cursor / focus to another monitor hands the "host" role over.
 
     KWin keeps tiles per desktop and un-tiles a window that is on all desktops as soon
-    as the current desktop changes. To keep visible frozen windows exactly where they are,
-    their geometry is remembered and put back right when that happens. (Hidden windows
-    are left alone: nobody sees them, and KWin re-tiles them when they are shown again.)
+    as the current desktop changes, moving it to its old floating geometry. So a visible
+    frozen window is detached from its tile first (it keeps its geometry, nothing moves)
+    and put back into the tile when its monitor becomes the active one again. (Hidden
+    windows are left alone: nobody sees them, and KWin re-tiles them when shown again.)
 
     Run the "Per-monitor desktops: restore normal behavior" shortcut (or the
     permonitordesktops-off helper) before disabling the script.
@@ -27,20 +28,18 @@
 
 const DEBUG = false;
 const POLL_MS = 100;
-const SWITCH_SETTLE_MS = 400;    // geometry changes this soon after a desktop switch are KWin's own
 
 const shownDesktop = new Map();  // output name -> VirtualDesktop shown on that monitor
 const logical = new Map();       // window -> VirtualDesktop it belongs to
 const pinned = new Set();        // windows the user put on all desktops
 const hiddenByUs = new Set();    // windows this script minimized to hide them
 const watchedDesktops = new Set();
-const anchors = new Map();       // frozen window -> { geometry, tiled }
+const detachedTiles = new Map(); // frozen window -> the tile it was detached from
 
 let host = null;                 // output name that owns the real desktop switching
 let lastCursorOutput = null;
 let enabled = true;
 let busy = 0;                    // > 0 while we change windows ourselves
-let lastDesktopSwitch = 0;       // timestamp of the last current-desktop change
 
 const poll = new QTimer();       // follows the cursor between monitors
 poll.interval = POLL_MS;
@@ -68,33 +67,48 @@ function isManaged(window) {
     return window.normalWindow;
 }
 
-function rectOf(geometry) {
-    return { x: geometry.x, y: geometry.y, width: geometry.width, height: geometry.height };
-}
-
-// Remember where a visible window sits before it is taken out of KWin's desktop switching.
-function freeze(window) {
-    if (!anchors.has(window)) {
-        anchors.set(window, { geometry: rectOf(window.frameGeometry), tiled: !!window.tile });
+function detachTile(window) {
+    if (window.tile && !detachedTiles.has(window)) {
+        detachedTiles.set(window, window.tile);
+        window.tile = null;
+        log("detached tile of", window.caption);
     }
 }
 
-// KWin un-tiles frozen windows when the current desktop changes (their tile belongs to
-// one desktop) and would move them to their old floating geometry a frame later.
-function restoreFrozenGeometry() {
+// A tile belongs to one desktop and can only be used while that desktop is the current one.
+function reattachTile(window) {
+    const tile = detachedTiles.get(window);
+    if (!tile) {
+        return;
+    }
+    if (window.tile) {
+        detachedTiles.delete(window);
+        return;
+    }
+    if (window.onAllDesktops || logical.get(window) !== workspace.currentDesktop) {
+        log("re-tile later", window.caption, "all", window.onAllDesktops,
+            "logical", logical.get(window) ? logical.get(window).name : "-", "current", workspace.currentDesktop.name);
+        return;
+    }
+    detachedTiles.delete(window);
+    try {
+        window.tile = tile;
+        log("re-tiled", window.caption, "->", !!window.tile);
+    } catch (error) {
+        log("could not re-tile", window.caption, error);
+    }
+}
+
+function reattachTiles() {
     if (!enabled) {
         return;
     }
-    anchors.forEach((anchor, window) => {
-        log("anchor", window.caption, "tiled", anchor.tiled, "tile now", !!window.tile);
-        if (anchor.tiled && !window.tile) {
-            window.frameGeometry = anchor.geometry;
-        }
-    });
-    workspace.windowList().forEach(window => {
-        if (isManaged(window) && !anchors.has(window) && window.onAllDesktops) {
-            log("no anchor", window.caption, "pinned", pinned.has(window), "hidden", hiddenByUs.has(window), "tile", !!window.tile);
-        }
+    guarded(() => {
+        detachedTiles.forEach((tile, window) => {
+            if (outputName(window.output) === host) {
+                reattachTile(window);
+            }
+        });
     });
 }
 
@@ -133,7 +147,6 @@ function place(window) {
     guarded(() => {
         if (name === host) {
             // Host monitor: ordinary KWin desktops.
-            anchors.delete(window);
             if (hiddenByUs.has(window)) {
                 hiddenByUs.delete(window);
                 window.desktops = [want];     // still minimized, so nothing flashes
@@ -141,6 +154,7 @@ function place(window) {
             } else if (window.onAllDesktops || window.desktops.length !== 1 || window.desktops[0] !== want) {
                 window.desktops = [want];
             }
+            reattachTile(window);
         } else if (want === shown(name)) {
             // Other monitor, window belongs to the desktop shown there: always visible.
             if (hiddenByUs.has(window)) {
@@ -148,7 +162,7 @@ function place(window) {
                 window.minimized = false;
             }
             if (!window.onAllDesktops) {
-                freeze(window);
+                detachTile(window);
                 window.onAllDesktops = true;
             }
         } else if (!hiddenByUs.has(window)) {
@@ -156,7 +170,6 @@ function place(window) {
             // Minimize first while it is still invisible on its own desktop, only then
             // detach it from desktop switching, so no animation or flash shows up.
             if (window.minimizable) {
-                anchors.delete(window);  // invisible: KWin may un-tile it, it is re-tiled when shown again
                 window.minimized = true;
                 hiddenByUs.add(window);
                 window.onAllDesktops = true;
@@ -193,7 +206,6 @@ function adopt(window) {
     window.desktopsChanged.connect(() => onDesktopsChanged(window));
     window.outputChanged.connect(() => onOutputChanged(window));
     window.minimizedChanged.connect(() => onMinimizedChanged(window));
-    window.frameGeometryChanged.connect(() => onGeometryChanged(window));
     if (!isManaged(window)) {
         return;
     }
@@ -202,18 +214,6 @@ function adopt(window) {
     } else if (window.desktops.length > 0) {
         logical.set(window, window.desktops[0]);
         place(window);
-    }
-}
-
-// A frozen window that changes on its own (not by our restore) keeps its new place.
-// Changes right after a desktop switch are KWin un-tiling it (X11 windows get that
-// synchronously, before we can react), so those must not become the new anchor.
-function onGeometryChanged(window) {
-    const anchor = anchors.get(window);
-    if (anchor && !busy && !window.move && !window.resize
-            && Date.now() - lastDesktopSwitch > SWITCH_SETTLE_MS) {
-        anchor.geometry = rectOf(window.frameGeometry);
-        anchor.tiled = !!window.tile;
     }
 }
 
@@ -330,7 +330,8 @@ function restoreNormalBehavior() {
             }
         });
         hiddenByUs.clear();
-        anchors.clear();
+        workspace.windowList().forEach(reattachTile);
+        detachedTiles.clear();
     });
 }
 
@@ -355,20 +356,20 @@ function main() {
         logical.delete(window);
         pinned.delete(window);
         hiddenByUs.delete(window);
-        anchors.delete(window);
+        detachedTiles.delete(window);
     });
     workspace.windowActivated.connect(window => {
+        log("activated", window ? window.caption : "none", "busy", busy);
         if (busy || !enabled || !window || !isManaged(window) || pinned.has(window) || hiddenByUs.has(window)) {
             return;
         }
         setHost(outputName(window.output));
     });
     workspace.currentDesktopChanged.connect(() => {
-        lastDesktopSwitch = Date.now();
-        guarded(restoreFrozenGeometry);
         if (!busy && enabled) {
             shownDesktop.set(host, workspace.currentDesktop);
         }
+        reattachTiles();
     });
     workspace.desktopsChanged.connect(() => {
         if (!busy && enabled) {
