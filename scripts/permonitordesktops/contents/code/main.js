@@ -27,6 +27,7 @@
 
 const DEBUG = false;
 const POLL_MS = 100;
+const SWITCH_SETTLE_MS = 400;    // geometry changes this soon after a desktop switch are KWin's own
 
 const shownDesktop = new Map();  // output name -> VirtualDesktop shown on that monitor
 const logical = new Map();       // window -> VirtualDesktop it belongs to
@@ -39,6 +40,7 @@ let host = null;                 // output name that owns the real desktop switc
 let lastCursorOutput = null;
 let enabled = true;
 let busy = 0;                    // > 0 while we change windows ourselves
+let lastDesktopSwitch = 0;       // timestamp of the last current-desktop change
 
 const poll = new QTimer();       // follows the cursor between monitors
 poll.interval = POLL_MS;
@@ -84,8 +86,14 @@ function restoreFrozenGeometry() {
         return;
     }
     anchors.forEach((anchor, window) => {
+        log("anchor", window.caption, "tiled", anchor.tiled, "tile now", !!window.tile);
         if (anchor.tiled && !window.tile) {
             window.frameGeometry = anchor.geometry;
+        }
+    });
+    workspace.windowList().forEach(window => {
+        if (isManaged(window) && !anchors.has(window) && window.onAllDesktops) {
+            log("no anchor", window.caption, "pinned", pinned.has(window), "hidden", hiddenByUs.has(window), "tile", !!window.tile);
         }
     });
 }
@@ -198,9 +206,12 @@ function adopt(window) {
 }
 
 // A frozen window that changes on its own (not by our restore) keeps its new place.
+// Changes right after a desktop switch are KWin un-tiling it (X11 windows get that
+// synchronously, before we can react), so those must not become the new anchor.
 function onGeometryChanged(window) {
     const anchor = anchors.get(window);
-    if (anchor && !busy && !window.move && !window.resize) {
+    if (anchor && !busy && !window.move && !window.resize
+            && Date.now() - lastDesktopSwitch > SWITCH_SETTLE_MS) {
         anchor.geometry = rectOf(window.frameGeometry);
         anchor.tiled = !!window.tile;
     }
@@ -353,6 +364,7 @@ function main() {
         setHost(outputName(window.output));
     });
     workspace.currentDesktopChanged.connect(() => {
+        lastDesktopSwitch = Date.now();
         guarded(restoreFrozenGeometry);
         if (!busy && enabled) {
             shownDesktop.set(host, workspace.currentDesktop);
