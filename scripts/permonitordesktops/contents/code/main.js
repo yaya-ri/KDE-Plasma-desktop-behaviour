@@ -28,7 +28,7 @@
 
 const DEBUG = false;
 const POLL_MS = 100;
-const SETTLE_MS = 800;           // longer than KWin's slide and minimize animations at normal speed
+const SETTLE_MS = 800;           // longer than KWin's slide animation at normal speed
 const MINIMIZE_MS = 400;         // longer than KWin's minimize animation at normal speed
 
 const shownDesktop = new Map();  // output name -> VirtualDesktop shown on that monitor
@@ -37,13 +37,15 @@ const pinned = new Set();        // windows the user put on all desktops
 const hiddenByUs = new Set();    // windows this script minimized to hide them
 const watchedDesktops = new Set();
 const detachedTiles = new Map(); // frozen window -> the tile it was detached from
-const pendingDetach = new Set(); // hidden windows not yet put on all desktops
+const transparent = new Map();   // window -> [opacity to restore, time it was made transparent]
 
 let host = null;                 // output name that owns the real desktop switching
 let lastCursorOutput = null;
 let enabled = true;
 let busy = 0;                    // > 0 while we change windows ourselves
 let settling = null;             // new host still frozen while the desktop switch slides
+let lastSwitch = 0;              // when the current desktop last changed
+let lastDesktop = null;          // the current desktop as of that change
 
 const poll = new QTimer();       // follows the cursor between monitors
 poll.interval = POLL_MS;
@@ -52,13 +54,8 @@ const settle = new QTimer();     // ends `settling` once the slide is over
 settle.singleShot = true;
 settle.interval = SETTLE_MS;
 
-const switchLater = new QTimer(); // switches to the settling host's desktop once minimizing is over
-switchLater.singleShot = true;
-switchLater.interval = MINIMIZE_MS;
-
-const detach = new QTimer();     // handles `pendingDetach` once the minimize animation is over
-detach.singleShot = true;
-detach.interval = SETTLE_MS;
+const opaque = new QTimer();     // gives `transparent` windows their opacity back
+opaque.interval = MINIMIZE_MS;
 
 function log(...args) {
     if (DEBUG) {
@@ -81,6 +78,33 @@ function outputName(output) {
 
 function isManaged(window) {
     return window.normalWindow;
+}
+
+// KWin plays the minimize animation even for a window on another desktop, so every
+// (un)minimize done by this script happens while the window is fully transparent.
+function setMinimized(window, minimized) {
+    if (!transparent.has(window)) {
+        transparent.set(window, [window.opacity, 0]);
+        window.opacity = 0;
+    }
+    transparent.get(window)[1] = Date.now();
+    window.minimized = minimized;
+    if (!opaque.active) {
+        opaque.start();
+    }
+}
+
+function restoreOpacity(all) {
+    const now = Date.now();
+    transparent.forEach(([opacity, since], window) => {
+        if (all || now - since >= MINIMIZE_MS) {
+            window.opacity = opacity;
+            transparent.delete(window);
+        }
+    });
+    if (transparent.size === 0) {
+        opaque.stop();
+    }
 }
 
 function detachTile(window) {
@@ -175,7 +199,7 @@ function place(window) {
             if (hiddenByUs.has(window)) {
                 hiddenByUs.delete(window);
                 window.desktops = [want];     // still minimized, so nothing flashes
-                window.minimized = false;
+                setMinimized(window, false);
             } else if (window.onAllDesktops || window.desktops.length !== 1 || window.desktops[0] !== want) {
                 window.desktops = [want];
             }
@@ -184,24 +208,19 @@ function place(window) {
             // Other monitor, window belongs to the desktop shown there: always visible.
             if (hiddenByUs.has(window)) {
                 hiddenByUs.delete(window);
-                window.minimized = false;
+                setMinimized(window, false);
             }
             if (!window.onAllDesktops) {
                 detachTile(window);
                 window.onAllDesktops = true;
             }
         } else if (!hiddenByUs.has(window)) {
-            // Other monitor, window belongs to another desktop: hide it.
-            // Minimize it while it is still invisible on its own desktop, and detach it from
-            // desktop switching only once the minimize animation is over: a window on all
-            // desktops is painted, animation included.
+            // Other monitor, window belongs to another desktop: hide it, and take it out of
+            // desktop switching so it stays hidden whatever the host monitor shows.
             if (window.minimizable) {
-                window.minimized = true;
+                setMinimized(window, true);
                 hiddenByUs.add(window);
-                if (!window.onAllDesktops) {
-                    pendingDetach.add(window);
-                    detach.start();
-                }
+                window.onAllDesktops = true;
             }
         }
     });
@@ -221,35 +240,18 @@ function setHost(name) {
         }
         const target = shown(name);
         settling = null;
-        switchLater.stop();
-        if (workspace.currentDesktop !== target) {
-            // Nothing native is on screen, but KWin still plays its slide animation, and
-            // windows joining the native desktop while it runs would slide along. So the
-            // new host stays frozen until the slide is over.
+        if (workspace.currentDesktop !== target || Date.now() - lastSwitch < SETTLE_MS) {
+            // Nothing native is on screen, but KWin still plays its slide animation (ours, or
+            // one that is still running), and windows joining the native desktop while it
+            // runs would slide along. So the new host stays frozen until the slide is over.
             settling = name;
-            if (minimizingOn(target)) {
-                switchLater.start();                  // or their animation shows up on it
-            } else {
-                switchDesktop();
+            if (workspace.currentDesktop !== target) {
+                workspace.currentDesktop = target;
             }
+            settle.start();
         }
         windowsOn(name).forEach(place);               // hand the new host over to KWin
     });
-}
-
-// Windows we just started to minimize on their own desktop: invisible until it becomes current.
-function minimizingOn(desktop) {
-    return Array.from(pendingDetach).some(w => w.minimized && w.desktops.indexOf(desktop) !== -1);
-}
-
-function switchDesktop() {
-    if (!enabled || settling !== host) {
-        return;
-    }
-    guarded(() => {
-        workspace.currentDesktop = shown(host);
-    });
-    settle.start();
 }
 
 function settled() {
@@ -258,20 +260,6 @@ function settled() {
     }
     settling = null;
     guarded(() => windowsOn(host).forEach(place));
-}
-
-function detachHidden() {
-    if (!enabled) {
-        return;
-    }
-    guarded(() => {
-        pendingDetach.forEach(window => {
-            if (hiddenByUs.has(window) && window.minimized) {
-                window.onAllDesktops = true;
-            }
-        });
-    });
-    pendingDetach.clear();
 }
 
 function reconcile() {
@@ -395,10 +383,8 @@ function restoreNormalBehavior() {
     enabled = false;
     poll.stop();
     settle.stop();
-    switchLater.stop();
     settling = null;
-    detach.stop();
-    pendingDetach.clear();
+    restoreOpacity(true);
     guarded(() => {
         workspace.windowList().forEach(window => {
             const want = logical.get(window);
@@ -419,8 +405,7 @@ function restoreNormalBehavior() {
 function main() {
     poll.timeout.connect(pollCursor);
     settle.timeout.connect(settled);
-    switchLater.timeout.connect(switchDesktop);
-    detach.timeout.connect(detachHidden);
+    opaque.timeout.connect(() => restoreOpacity(false));
     workspace.screens.forEach(screen => shownDesktop.set(screen.name, workspace.currentDesktop));
     lastCursorOutput = cursorOutput();
     host = lastCursorOutput || outputName(workspace.activeScreen) || workspace.screens[0].name;
@@ -441,7 +426,7 @@ function main() {
         pinned.delete(window);
         hiddenByUs.delete(window);
         detachedTiles.delete(window);
-        pendingDetach.delete(window);
+        transparent.delete(window);
     });
     workspace.windowActivated.connect(window => {
         log("activated", window ? window.caption : "none", "busy", busy);
@@ -450,11 +435,16 @@ function main() {
         }
         setHost(outputName(window.output));
     });
+    lastDesktop = workspace.currentDesktop;
     workspace.currentDesktopChanged.connect(() => {
+        if (workspace.currentDesktop === lastDesktop) {
+            return;  // KWin sometimes reports a change that did not change anything
+        }
+        lastDesktop = workspace.currentDesktop;
+        lastSwitch = Date.now();
         if (!busy && enabled) {
             // The user switched desktops on the host while it was still settling: hand it to
             // KWin right away so its windows slide along.
-            switchLater.stop();
             settling = null;
             shownDesktop.set(host, workspace.currentDesktop);
             windowsOn(host).forEach(place);
