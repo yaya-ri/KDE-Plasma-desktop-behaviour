@@ -14,7 +14,7 @@
 
     KWin keeps tiles per desktop and un-tiles a window that is on all desktops as soon
     as the current desktop changes, moving it to its old floating geometry. So a visible
-    frozen window is detached from its tile first (it keeps its geometry, nothing moves)
+    frozen window is detached from its tile first (its geometry is kept, nothing moves)
     and put back into the tile when its monitor becomes the active one again. (Hidden
     windows are left alone: nobody sees them, and KWin re-tiles them when shown again.)
 
@@ -69,8 +69,12 @@ function isManaged(window) {
 
 function detachTile(window) {
     if (window.tile && !detachedTiles.has(window)) {
+        // Dropping the tile can send the window back to its floating geometry (seen with
+        // custom tiles), so put it right back where it is before anything is painted.
+        const geometry = window.frameGeometry;
         detachedTiles.set(window, window.tile);
         window.tile = null;
+        window.frameGeometry = geometry;
         log("detached tile of", window.caption);
     }
 }
