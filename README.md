@@ -120,6 +120,7 @@ Pada KDE biasa, desktop virtual bersifat global. Kalau kamu menggeser dari Deskt
 - Kalau monitor dicabut, jendela yang tersembunyi di sana muncul di monitor yang tersisa.
 - Dialog dan jendela khusus tidak dikelola.
 - Perpindahan monitor aktif lewat kursor dicek tiap 100 ms.
+- Kalau dua monitor menampilkan desktop berbeda, perpindahan kursor ikut mengganti desktop aktif KDE, dan efek Slide memutar animasinya. Jendela tetap diam, tapi wallpaper ikut tergeser. Karena itu `kde-desktop-behaviour enable per-monitor-desktops` mematikan opsi **Slide desktop background** milik efek Slide, dan `disable` mengembalikan nilai semula. Saat menggeser desktop secara biasa, hanya jendelanya yang bergeser.
 
 **Cara mematikan yang aman.** Script ini mengubah status jendela (on all desktops / minimize). Kalau dimatikan hanya dengan menghilangkan centang di System Settings, jendela bisa tertinggal berstatus "on all desktops" atau ter-minimize. Karena itu matikan lewat:
 

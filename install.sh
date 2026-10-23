@@ -54,6 +54,10 @@ kwin_invoke_shortcut() {
     if [[ -n $QDBUS ]]; then "$QDBUS" org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component.invokeShortcut "$1" >/dev/null 2>&1
     else busctl --user call org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component invokeShortcut s "$1" >/dev/null 2>&1; fi
 }
+kwin_reconfigure_effect() {
+    if [[ -n $QDBUS ]]; then "$QDBUS" org.kde.KWin /Effects org.kde.kwin.Effects.reconfigureEffect "$1" >/dev/null 2>&1
+    else busctl --user call org.kde.KWin /Effects org.kde.kwin.Effects reconfigureEffect s "$1" >/dev/null 2>&1; fi
+}
 kwin_running() {
     if [[ -n $QDBUS ]]; then "$QDBUS" org.kde.KWin >/dev/null 2>&1
     else busctl --user status org.kde.KWin >/dev/null 2>&1; fi
@@ -83,6 +87,28 @@ feature_src() {
     else printf '%s/scripts/%s' "$REPO_DIR" "$id"; fi
 }
 feature_installed() { [[ -d "$(feature_dir "$1")" ]]; }
+
+# per-monitor-desktops mengganti desktop global setiap kali kursor pindah monitor. Efek Slide
+# ikut menggeser wallpaper saat itu, jadi opsi "Slide desktop background" dimatikan selama
+# fitur aktif. Nilai lamanya disimpan supaya bisa dikembalikan saat fitur dimatikan.
+slide_background_off() {
+    local before
+    if [[ -z $(kreadconfig6 --file kwinrc --group Script-permonitordesktops --key SlideBackgroundBefore) ]]; then
+        before=$(kreadconfig6 --file kwinrc --group Effect-slide --key SlideBackground)
+        kwriteconfig6 --file kwinrc --group Script-permonitordesktops --key SlideBackgroundBefore "${before:-default}"
+    fi
+    kwriteconfig6 --file kwinrc --group Effect-slide --key SlideBackground false
+    kwin_reconfigure_effect slide
+}
+slide_background_restore() {
+    local before
+    before=$(kreadconfig6 --file kwinrc --group Script-permonitordesktops --key SlideBackgroundBefore)
+    [[ -n $before ]] || return 0
+    if [[ $before == default ]]; then kwriteconfig6 --file kwinrc --group Effect-slide --key SlideBackground --delete
+    else kwriteconfig6 --file kwinrc --group Effect-slide --key SlideBackground "$before"; fi
+    kwriteconfig6 --file kwinrc --group Script-permonitordesktops --key SlideBackgroundBefore --delete
+    kwin_reconfigure_effect slide
+}
 feature_enabled() {
     local id; id=$(feature_field "$1" 2)
     [[ $(kreadconfig6 --file kwinrc --group Plugins --key "${id}Enabled" 2>/dev/null) == true ]]
@@ -143,6 +169,7 @@ enable_one() {
     type=$(feature_field "$name" 1); id=$(feature_field "$name" 2)
     feature_installed "$name" || die "'$name' belum dipasang. Jalankan: $0 install"
     kwriteconfig6 --file kwinrc --group Plugins --key "${id}Enabled" true
+    if [[ $name == per-monitor-desktops ]]; then slide_background_off; fi
     kwin_reconfigure
     if [[ $type == effect ]]; then kwin_load_effect "$id"; fi
     ok "Aktif: $name"
@@ -157,6 +184,7 @@ disable_one() {
         sleep 1
     fi
     kwriteconfig6 --file kwinrc --group Plugins --key "${id}Enabled" false
+    if [[ $name == per-monitor-desktops ]]; then slide_background_restore; fi
     if [[ $type == effect ]]; then kwin_unload_effect "$id"; fi
     kwin_reconfigure
     ok "Nonaktif: $name"
