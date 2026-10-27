@@ -34,6 +34,7 @@ const DEBUG = false;
 const POLL_MS = 100;
 const SETTLE_MS = 800;           // longer than KWin's slide animation at normal speed
 const MINIMIZE_MS = 400;         // longer than KWin's minimize animation at normal speed
+const HOLD_MS = 50;
 
 const shownDesktop = new Map();  // output name -> VirtualDesktop shown on that monitor
 const logical = new Map();       // window -> VirtualDesktop it belongs to
@@ -61,6 +62,10 @@ settle.interval = SETTLE_MS;
 
 const opaque = new QTimer();     // gives `transparent` windows their opacity back
 opaque.interval = MINIMIZE_MS;
+
+const hold = new QTimer();       // holds frozen windows again once KWin's own geometry changes landed
+hold.singleShot = true;
+hold.interval = HOLD_MS;
 
 function log(...args) {
     if (DEBUG) {
@@ -247,11 +252,17 @@ function place(window) {
                 hiddenByUs.delete(window);
                 setMinimized(window, false);
             }
+            // Taken before the tile is dropped: some windows (seen with Konsole) go back to
+            // their floating geometry anyway and ignore detachTile() putting them back.
+            freeze(window);
             if (!window.onAllDesktops) {
                 detachTile(window);
                 window.onAllDesktops = true;
             }
-            freeze(window);
+            holdFrozen(window);
+            if (!hold.active) {
+                hold.start();
+            }
         } else if (!hiddenByUs.has(window)) {
             // Other monitor, window belongs to another desktop: hide it, and take it out of
             // desktop switching so it stays hidden whatever the host monitor shows.
@@ -433,6 +444,7 @@ function restoreNormalBehavior() {
     enabled = false;
     poll.stop();
     settle.stop();
+    hold.stop();
     settling = null;
     restoreOpacity(true);
     guarded(() => {
@@ -457,6 +469,7 @@ function main() {
     poll.timeout.connect(pollCursor);
     settle.timeout.connect(settled);
     opaque.timeout.connect(() => restoreOpacity(false));
+    hold.timeout.connect(() => frozenAt.forEach((geometry, window) => holdFrozen(window)));
     workspace.screens.forEach(screen => shownDesktop.set(screen.name, workspace.currentDesktop));
     lastCursorOutput = cursorOutput();
     host = lastCursorOutput || outputName(workspace.activeScreen) || workspace.screens[0].name;
