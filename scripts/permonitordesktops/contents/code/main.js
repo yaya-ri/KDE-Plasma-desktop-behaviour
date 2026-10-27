@@ -18,6 +18,10 @@
     and put back into the tile when its monitor becomes the active one again. (Hidden
     windows are left alone: nobody sees them, and KWin re-tiles them when shown again.)
 
+    KWin also remembers a tile per desktop, and gives a window on all desktops the tile it
+    has on the new current desktop whenever the desktop changes. A frozen window must not
+    move, so such a tile is dropped right away and the window put back where it was frozen.
+
     Run the "Per-monitor desktops: restore normal behavior" shortcut (or the
     permonitordesktops-off helper) before disabling the script.
 
@@ -37,6 +41,7 @@ const pinned = new Set();        // windows the user put on all desktops
 const hiddenByUs = new Set();    // windows this script minimized to hide them
 const watchedDesktops = new Set();
 const detachedTiles = new Map(); // frozen window -> the tile it was detached from
+const frozenAt = new Map();      // visible window on another monitor -> geometry it is frozen at
 const transparent = new Map();   // window -> [opacity to restore, time it was made transparent]
 
 let host = null;                 // output name that owns the real desktop switching
@@ -119,6 +124,37 @@ function detachTile(window) {
     }
 }
 
+function rectText(rect) {
+    return rect ? Math.round(rect.x) + "," + Math.round(rect.y) + " " + Math.round(rect.width) + "x" + Math.round(rect.height) : "-";
+}
+
+function sameRect(a, b) {
+    return Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1
+        && Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1;
+}
+
+function freeze(window) {
+    if (!frozenAt.has(window)) {
+        const g = window.frameGeometry;
+        frozenAt.set(window, {x: g.x, y: g.y, width: g.width, height: g.height});
+    }
+}
+
+// Undo whatever tile KWin gave a frozen window (see the top of this file).
+function holdFrozen(window) {
+    const geometry = frozenAt.get(window);
+    if (!enabled || !geometry || (!window.tile && sameRect(window.frameGeometry, geometry))) {
+        return;
+    }
+    log("hold frozen", window.caption, rectText(window.frameGeometry), "->", rectText(geometry), "tile", !!window.tile);
+    guarded(() => {
+        if (window.tile) {
+            window.tile = null;
+        }
+        window.frameGeometry = geometry;
+    });
+}
+
 // A tile belongs to one desktop and can only be used while that desktop is the current one.
 function reattachTile(window) {
     const tile = detachedTiles.get(window);
@@ -196,6 +232,7 @@ function place(window) {
     guarded(() => {
         if (native) {
             // Host monitor: ordinary KWin desktops.
+            frozenAt.delete(window);
             if (hiddenByUs.has(window)) {
                 hiddenByUs.delete(window);
                 window.desktops = [want];     // still minimized, so nothing flashes
@@ -214,9 +251,11 @@ function place(window) {
                 detachTile(window);
                 window.onAllDesktops = true;
             }
+            freeze(window);
         } else if (!hiddenByUs.has(window)) {
             // Other monitor, window belongs to another desktop: hide it, and take it out of
             // desktop switching so it stays hidden whatever the host monitor shows.
+            frozenAt.delete(window);
             if (window.minimizable) {
                 setMinimized(window, true);
                 hiddenByUs.add(window);
@@ -267,6 +306,17 @@ function reconcile() {
 }
 
 function adopt(window) {
+    window.tileChanged.connect(() => holdFrozen(window));
+    window.interactiveMoveResizeFinished.connect(() => {
+        if (frozenAt.has(window)) {
+            frozenAt.delete(window);  // moved by the user: freeze it where it was dropped
+            freeze(window);
+        }
+    });
+    if (DEBUG) {
+        window.frameGeometryChanged.connect(old => log("geometry", window.caption, rectText(old), "->",
+            rectText(window.frameGeometry), "tile", !!window.tile, "all", window.onAllDesktops, "busy", busy));
+    }
     window.desktopsChanged.connect(() => onDesktopsChanged(window));
     window.outputChanged.connect(() => onOutputChanged(window));
     window.minimizedChanged.connect(() => onMinimizedChanged(window));
@@ -397,6 +447,7 @@ function restoreNormalBehavior() {
             }
         });
         hiddenByUs.clear();
+        frozenAt.clear();
         workspace.windowList().forEach(reattachTile);
         detachedTiles.clear();
     });
@@ -426,6 +477,7 @@ function main() {
         pinned.delete(window);
         hiddenByUs.delete(window);
         detachedTiles.delete(window);
+        frozenAt.delete(window);
         transparent.delete(window);
     });
     workspace.windowActivated.connect(window => {
@@ -449,6 +501,7 @@ function main() {
             shownDesktop.set(host, workspace.currentDesktop);
             windowsOn(host).forEach(place);
         }
+        frozenAt.forEach((geometry, window) => holdFrozen(window));
         reattachTiles();
     });
     workspace.desktopsChanged.connect(() => {
