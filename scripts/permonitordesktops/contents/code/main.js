@@ -35,6 +35,8 @@ const POLL_MS = 100;
 const SETTLE_MS = 800;           // longer than KWin's slide animation at normal speed
 const MINIMIZE_MS = 400;         // longer than KWin's minimize animation at normal speed
 const HOLD_MS = 50;
+// Effects that show every desktop; switching the current desktop under them slides their view.
+const OVERVIEW_EFFECTS = ["overview", "windowview"];
 
 const shownDesktop = new Map();  // output name -> VirtualDesktop shown on that monitor
 const logical = new Map();       // window -> VirtualDesktop it belongs to
@@ -52,6 +54,7 @@ let busy = 0;                    // > 0 while we change windows ourselves
 let settling = null;             // new host still frozen while the desktop switch slides
 let lastSwitch = 0;              // when the current desktop last changed
 let lastDesktop = null;          // the current desktop as of that change
+let checkingEffects = false;     // waiting for KWin to say which effects are active
 
 const poll = new QTimer();       // follows the cursor between monitors
 poll.interval = POLL_MS;
@@ -434,10 +437,22 @@ function pollCursor() {
         return;  // follow the cursor once the drag is over
     }
     const name = cursorOutput();
-    if (name && name !== lastCursorOutput) {
+    if (!name || name === lastCursorOutput || checkingEffects) {
+        return;
+    }
+    // While the overview is open the cursor only moves around in it: keep the current desktop,
+    // and follow the cursor once the overview is closed (the next poll asks again).
+    checkingEffects = true;
+    callDBus("org.kde.KWin", "/Effects", "org.freedesktop.DBus.Properties", "Get",
+             "org.kde.kwin.Effects", "activeEffects", active => {
+        checkingEffects = false;
+        const overview = String(active).split(",").some(name => OVERVIEW_EFFECTS.indexOf(name) !== -1);
+        if (!enabled || overview || cursorOutput() !== name) {
+            return;
+        }
         lastCursorOutput = name;
         setHost(name);
-    }
+    });
 }
 
 function restoreNormalBehavior() {
